@@ -11,13 +11,6 @@ obs_lng = -74.0060
 obs_alt = 0
 second = 5
 
-"""
-url = f"https://api.n2yo.com/rest/v1/satellite/positions/{id}/{obs_lat}/{obs_lng}/{obs_alt}/{second}&apiKey={API_KEY}"
-
-r = requests.get(url)
-pp(r.json())
-"""
-
 class SatellitePosition:
     def __init__(self, id: int, name:str, tle1: str, tle2: str, transactions_count: int):
         self.id = id
@@ -27,13 +20,13 @@ class SatellitePosition:
         self.transactions_count = transactions_count
 
 
-def get_satellite_position(id: int, obs_lat: float, obs_lng: float, obs_alt: int, second: int):
-    url = f"https://api.n2yo.com/rest/v1/satellite/positions/{id}/{obs_lat}/{obs_lng}/{obs_alt}/{second}&apiKey={API_KEY}"
-    r = requests.get(url)
-    return r.json()
+# def get_satellite_position(id: int, obs_lat: float, obs_lng: float, obs_alt: int, second: int):
+#     url = f"https://api.n2yo.com/rest/v1/satellite/positions/{id}/{obs_lat}/{obs_lng}/{obs_alt}/{second}&apiKey={API_KEY}"
+#     r = requests.get(url)
+#     return r.json()
 
 
-def get_satellite_tle(id: int) -> SatellitePosition:
+def get_satellite_data(id: int) -> SatellitePosition:
     url = f"https://api.n2yo.com/rest/v1/satellite/tle/{id}&apiKey={API_KEY}"
     r = requests.get(url)
 
@@ -45,6 +38,3 @@ def get_satellite_tle(id: int) -> SatellitePosition:
         transactions_count=0
     )
     return (pos.tle1, pos.tle2)
-
-print(get_satellite_tle(25544)[0])
-print(get_satellite_tle(25544)[1])
