@@ -1,18 +1,18 @@
-import requests
-import os
-from dotenv import load_dotenv
-from pprint import pp
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
-API_KEY = os.getenv("API_KEY")
+from parse import get_satellite_tle
 
-id = 60549
-obs_lat = 40.7128
-obs_lng = -74.0060
-obs_alt = 0
-second = 5
+app = FastAPI(title="Satellite Tracking API")
 
-url = f"https://api.n2yo.com/rest/v1/satellite/positions/{id}/{obs_lat}/{obs_lng}/{obs_alt}/{second}&apiKey={API_KEY}"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-r = requests.get(url)
-pp(r.json())
+@app.get("/")
+def root():
+    text = get_satellite_tle(60549)
+    return {"message": f"{text}"}
