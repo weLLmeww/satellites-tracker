@@ -1,11 +1,8 @@
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import json
 import os
-import time
-from loguru import logger
-
 
 app = FastAPI(
     title="Satellites Tracker API",
@@ -20,45 +17,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==================== REQUEST LOGGING MIDDLEWARE ====================
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Logs each incoming request with method, path, status code, and duration."""
-    start_time = time.time()
-    try:
-        response = await call_next(request)
-        process_time = (time.time() - start_time) * 1000  # milliseconds
-        logger.info(
-            f"{request.method} {request.url.path} - Status: {response.status_code} - Duration: {process_time:.2f}ms"
-        )
-        return response
-    except Exception as e:
-        logger.exception(f"Unhandled exception during {request.method} {request.url.path}")
-        raise
-
-
-# ==================== LOAD DATA ====================
+# Загружаем satellites.json один раз при старте сервера
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 JSON_PATH = os.path.join(BASE_DIR, "satellites.json")
 
-logger.info(f"Loading satellites from {JSON_PATH}")
+with open(JSON_PATH, "r", encoding="utf-8") as f:
+    SATELLITES: list[dict] = json.load(f)
 
-try:
-    with open(JSON_PATH, "r", encoding="utf-8") as f:
-        SATELLITES: list[dict] = json.load(f)
-    logger.info(f"Loaded {len(SATELLITES)} satellites")
-except FileNotFoundError:
-    logger.error(f"Satellites file not found at {JSON_PATH}. Exiting.")
-    raise
-except json.JSONDecodeError as e:
-    logger.error(f"Invalid JSON in {JSON_PATH}: {e}. Exiting.")
-    raise
-
+# Индекс по ID для быстрого поиска
 SAT_INDEX: dict[int, dict] = {sat["id"]: sat for sat in SATELLITES}
 
 
-
-# ==================== ENDPOINTS ====================
 # ──────────────────────────────────────────────
 # GET /satellites
 # ──────────────────────────────────────────────
@@ -87,7 +56,6 @@ def get_satellites(
     total = len(result)
     paginated = result[offset: offset + limit]
 
-    logger.debug(f"Satellites list: total={total}, limit={limit}, offset={offset}, filters={country}/{type}/{orbit}")
     return {
         "total": total,
         "limit": limit,
@@ -110,7 +78,6 @@ def search_satellites(
     limit: int = Query(100, ge=1, le=1000, description="Максимум результатов"),
 ):
     results = [s for s in SATELLITES if q.upper() in s["name"].upper()]
-    logger.debug(f"Search query '{q}' returned {len(results)} results")
     return {
         "total": len(results),
         "query": q,
@@ -130,9 +97,7 @@ def search_satellites(
 def get_satellite(sat_id: int):
     sat = SAT_INDEX.get(sat_id)
     if not sat:
-        logger.warning(f"Satellite with ID {sat_id} not found")
         raise HTTPException(status_code=404, detail=f"Спутник с ID {sat_id} не найден")
-    logger.debug(f"Retrieved satellite ID {sat_id}: {sat.get('name')}")
     return sat
 
 
@@ -150,7 +115,6 @@ def get_meta():
     types     = sorted(set(s.get("type", "Unknown") for s in SATELLITES))
     orbits    = sorted(set(s.get("orbit", "Unknown") for s in SATELLITES))
 
-    logger.debug("Meta endpoint called")
     return {
         "total": len(SATELLITES),
         "countries": countries,
