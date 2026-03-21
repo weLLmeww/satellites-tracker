@@ -2,7 +2,7 @@ import './style.css';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import * as Cesium from 'cesium';
 import * as satellite from 'satellite.js';
-import { fetchSatellitesData } from './api.js';
+import { fetchSatellitesData, fetchMeta } from './api.js'; 
 
 // ==========================================
 // 1. ИНИЦИАЛИЗАЦИЯ CESIUM
@@ -133,15 +133,60 @@ async function initApp() {
     const loader = document.getElementById('loader');
     const loaderText = document.getElementById('loaderText');
 
-    loaderText.innerText = "Загрузка TLE данных...";
-    satellitesData = await fetchSatellitesData();
+    try {
+        loaderText.innerText = "Загрузка TLE данных...";
+        
+        // Загружаем данные параллельно для скорости
+        const [satellites, metaData] = await Promise.all([
+            fetchSatellitesData(),
+            fetchMeta()
+        ]);
 
-    loaderText.innerText = "Расчет орбит...";
-    satellitesData.forEach(createSatelliteEntity);
+        satellitesData = satellites;
 
-    // Убираем лоадер
-    loader.style.opacity = '0';
-    setTimeout(() => loader.style.display = 'none', 500);
+        // Заполняем фильтры (select) данными с бэкенда
+        populateFilters(metaData);
+
+        loaderText.innerText = "Расчет орбит...";
+        // Отрисовываем спутники с небольшой задержкой, чтобы не заблокировать UI
+        setTimeout(() => {
+            satellitesData.forEach(createSatelliteEntity);
+            
+            // Убираем лоадер
+            loader.style.opacity = '0';
+            setTimeout(() => loader.style.display = 'none', 500);
+        }, 100);
+
+    } catch (error) {
+        loaderText.innerText = "Ошибка загрузки данных!";
+        loaderText.style.color = "red";
+        console.error(error);
+    }
+}
+
+// Функция для динамического заполнения выпадающих списков
+function populateFilters(meta) {
+    const countrySelect = document.getElementById('filterCountry');
+    const orbitSelect = document.getElementById('filterOrbit');
+    const purposeSelect = document.getElementById('filterPurpose'); // В бэке это types
+
+    if (!countrySelect || !orbitSelect || !purposeSelect) return;
+
+    // Очищаем и оставляем только "Все"
+    countrySelect.innerHTML = '<option value="ALL">Все страны</option>';
+    meta.countries.forEach(c => {
+        countrySelect.innerHTML += `<option value="${c}">${c}</option>`;
+    });
+
+    orbitSelect.innerHTML = '<option value="ALL">Все орбиты</option>';
+    meta.orbits.forEach(o => {
+        orbitSelect.innerHTML += `<option value="${o}">${o}</option>`;
+    });
+
+    purposeSelect.innerHTML = '<option value="ALL">Все назначения</option>';
+    meta.types.forEach(t => {
+        purposeSelect.innerHTML += `<option value="${t}">${t}</option>`;
+    });
 }
 
 initApp();
