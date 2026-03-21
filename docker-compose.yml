@@ -1,10 +1,22 @@
 version: '3.8'
-
 services:
   backend:
     build: ./backend
     container_name: satellites-backend
-    ports:
-      - "5000:5000"
+    # ports убраны — бэкенд недоступен снаружи
     restart: always
-
+    networks:
+      - app-network
+  frontend:
+    build: ./frontend/satellite-frontend
+    container_name: satellites-frontend
+    ports:
+      - "80:80"
+    restart: always
+    depends_on:
+      - backend
+    networks:
+      - app-network
+networks:
+  app-network:
+    driver: bridge
