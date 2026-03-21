@@ -490,6 +490,8 @@ async function initApp() {
 
         satellitesData = satellites;
         populateFilters(metaData);
+        // Синхронизируем мобильные фильтры
+        if (window.syncMobileFilters) window.syncMobileFilters();
 
         loaderText.innerText = "Расчет орбит...";
 
@@ -509,6 +511,14 @@ async function initApp() {
                 loader.style.opacity = '0';
                 setTimeout(() => (loader.style.display = 'none'), 500);
                 updateSatCounter();
+                // Инжектируем панель сравнения — здесь filterCountry уже заполнен
+                const countrySelect = document.getElementById('filterCountry');
+                const countries = [...countrySelect.options]
+                    .map(o => o.value)
+                    .filter(v => v !== 'ALL');
+                injectComparisonPanel(countries);
+                // Синхронизируем мобильный шит сравнения
+                if (window.syncCompareOptions) window.syncCompareOptions();
             }
         }
 
@@ -518,8 +528,6 @@ async function initApp() {
         loaderText.style.color = "red";
         console.error(error);
     }
-    // Инжектируем панель сравнения группировок
-    injectComparisonPanel(meta.countries);
 }
 
 // ==========================================
@@ -602,8 +610,8 @@ function runComparison() {
 
     // Статистика
     const statsEl = document.getElementById('compareStats');
-    const orbitsA = Object.entries(orbitCountA).map(([k,v]) => k + ': ' + v).join(' · ');
-    const orbitsB = Object.entries(orbitCountB).map(([k,v]) => k + ': ' + v).join(' · ');
+    const orbitsA = Object.entries(orbitCountA).map(([k, v]) => k + ': ' + v).join(' · ');
+    const orbitsB = Object.entries(orbitCountB).map(([k, v]) => k + ': ' + v).join(' · ');
 
     statsEl.innerHTML = `
         <div class="compare-stat">
@@ -732,11 +740,22 @@ if (resetBtn) {
 }
 
 // ==========================================
-// 15. КЛИК ПО СПУТНИКУ
+// 15. КЛИК ПО СПУТНИКУ + МОБАЙЛ НАБЛЮДАТЕЛЬ (единый LEFT_CLICK handler)
 // ==========================================
 const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
 handler.setInputAction((movement) => {
+    // Мобайл: если активен режим наблюдателя — устанавливаем точку и выходим
+    if (window.isObserverMode && window.isObserverMode()) {
+        const ray = viewer.camera.getPickRay(movement.position);
+        const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+        if (cartesian) {
+            setObserverAt(cartesian);
+            if (window.showToast) window.showToast('📍 Точка наблюдателя установлена');
+        }
+        return;
+    }
+
     const pickedObject = viewer.scene.pick(movement.position);
 
     if (activeSatelliteId) {
@@ -758,7 +777,6 @@ handler.setInputAction((movement) => {
 
         showActiveSatelliteDetails(satId);
 
-        // Высота из реальной позиции (обновляется в updateSatCardCoords каждые 500мс)
         const nowDate = new Date();
         const posVelNow = satellite.propagate(entry.satrec, nowDate);
         let altKmReal = null;
@@ -768,7 +786,6 @@ handler.setInputAction((movement) => {
             altKmReal = gdNow.height;
         }
 
-        // Период из TLE (satrec.no — среднее движение в рад/мин)
         const periodMinReal = entry.satrec.no > 0
             ? (2 * Math.PI / entry.satrec.no).toFixed(1)
             : null;
@@ -786,14 +803,13 @@ handler.setInputAction((movement) => {
         document.getElementById('satAlt').innerText = altVal;
         document.getElementById('satPeriod').innerText = periodVal;
 
-        // Следующий пролёт над точкой наблюдателя
         const nextPassEl = document.getElementById('satNextPass');
         if (nextPassEl) {
             if (currentObserverCoords) {
                 const nextPass = calcNextPass(entry.satrec, currentObserverCoords);
                 nextPassEl.innerText = nextPass
                     ? nextPass.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      + ' ' + nextPass.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
+                    + ' ' + nextPass.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
                     : 'Нет пролётов (24ч)';
             } else {
                 nextPassEl.innerText = 'Выберите точку (Shift+клик)';
@@ -802,7 +818,7 @@ handler.setInputAction((movement) => {
 
         document.getElementById('satCard').style.display = 'block';
     } else {
-        // Клик на пустое место — отпускаем слежение за спутником
+        // Клик на пустое место — отпускаем слежение и возвращаем камеру к Земле
         if (viewer.trackedEntity) {
             viewer.trackedEntity = undefined;
             if (viewer._trackedSatEntity) {
@@ -810,7 +826,7 @@ handler.setInputAction((movement) => {
                 viewer._trackedSatEntity = null;
                 viewer._trackedSatrec = null;
             }
-            // Плавно возвращаемся к виду Земли без телепортации
+            // Анимированный возврат камеры к Земле сверху
             viewer.camera.flyToBoundingSphere(
                 new Cesium.BoundingSphere(Cesium.Cartesian3.ZERO, 6371000 * 3),
                 {
@@ -851,70 +867,71 @@ viewModeBtn.addEventListener('click', () => {
 // ==========================================
 // 18. РАСЧЁТ ПРОЛЁТОВ (SHIFT + КЛИК + WEB WORKER)
 // ==========================================
+
+// Общая функция установки наблюдателя (используется и десктопом и мобайлом)
+function setObserverAt(cartesian) {
+    const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+    const observerLocation = {
+        longitude: cartographic.longitude,
+        latitude: cartographic.latitude,
+        height: cartographic.height / 1000
+    };
+    currentObserverCoords = observerLocation;
+
+    if (observerEntity) viewer.entities.remove(observerEntity);
+    observerEntity = viewer.entities.add({
+        position: cartesian,
+        point: {
+            pixelSize: 10,
+            color: Cesium.Color.LIME,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2
+        },
+        label: {
+            text: 'НАБЛЮДАТЕЛЬ',
+            font: '500 11px -apple-system, system-ui, sans-serif, subpixel-antialiased',
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 3,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            pixelOffset: new Cesium.Cartesian2(0, -14),
+            letterSpacing: 1,
+        }
+    });
+
+    const passesListDiv = document.getElementById('passesList');
+    passesListDiv.innerHTML = '<p style="color:#63b3ed;text-align:center;">Анализ орбит (Worker)... ⏳</p>';
+
+    passPredictionWorker.postMessage({
+        observerCoords: observerLocation,
+        satellites: satellitesData.filter(sat => {
+            const entry = satMap.get(sat.id);
+            return entry && entry.show;
+        }),
+        startTime: Date.now()
+    });
+
+    if (activeSatelliteId) {
+        const entry = satMap.get(activeSatelliteId);
+        const nextPassEl = document.getElementById('satNextPass');
+        if (entry && nextPassEl) {
+            const nextPass = calcNextPass(entry.satrec, currentObserverCoords);
+            nextPassEl.innerText = nextPass
+                ? nextPass.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                + ' ' + nextPass.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
+                : 'Нет пролётов (24ч)';
+        }
+    }
+
+    // Деактивируем мобильный режим наблюдателя после установки
+    if (window.deactivateObserverMode) window.deactivateObserverMode();
+}
+// Десктоп: Shift + ЛКМ — установка наблюдателя
 handler.setInputAction((movement) => {
     const ray = viewer.camera.getPickRay(movement.position);
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
-
-    if (cartesian) {
-        const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-        const observerLocation = {
-            longitude: cartographic.longitude,
-            latitude: cartographic.latitude,
-            height: cartographic.height / 1000
-        };
-
-        // Сохраняем для calcNextPass в карточке
-        currentObserverCoords = observerLocation;
-
-        if (observerEntity) viewer.entities.remove(observerEntity);
-        observerEntity = viewer.entities.add({
-            position: cartesian,
-            point: {
-                pixelSize: 10,
-                color: Cesium.Color.LIME,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 2
-            },
-            label: {
-                text: 'НАБЛЮДАТЕЛЬ',
-                font: '500 11px Geist, system-ui, sans-serif',
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                fillColor: Cesium.Color.WHITE,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
-                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                pixelOffset: new Cesium.Cartesian2(0, -14),
-                letterSpacing: 1,
-            }
-        });
-
-        const passesListDiv = document.getElementById('passesList');
-        passesListDiv.innerHTML =
-            '<p style="color:#63b3ed;text-align:center;">Анализ орбит (Worker)... ⏳</p>';
-
-        passPredictionWorker.postMessage({
-            observerCoords: observerLocation,
-            // Отправляем только видимые (отфильтрованные) спутники
-            satellites: satellitesData.filter(sat => {
-                const entry = satMap.get(sat.id);
-                return entry && entry.show;
-            }),
-            startTime: Date.now()
-        });
-
-        // Если карточка открыта — обновить поле следующего пролёта
-        if (activeSatelliteId) {
-            const entry = satMap.get(activeSatelliteId);
-            const nextPassEl = document.getElementById('satNextPass');
-            if (entry && nextPassEl) {
-                const nextPass = calcNextPass(entry.satrec, currentObserverCoords);
-                nextPassEl.innerText = nextPass
-                    ? nextPass.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      + ' ' + nextPass.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
-                    : 'Нет пролётов (24ч)';
-            }
-        }
-    }
+    if (cartesian) setObserverAt(cartesian);
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK, Cesium.KeyboardEventModifier.SHIFT);
 
 // ==========================================
@@ -984,10 +1001,10 @@ passPredictionWorker.onmessage = function (e) {
                         ? (() => {
                             const np = calcNextPass(entry.satrec, currentObserverCoords);
                             return np
-                                ? np.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
-                                  + ' ' + np.toLocaleDateString([], { day:'2-digit', month:'2-digit' })
+                                ? np.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                + ' ' + np.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
                                 : 'Нет пролётов (24ч)';
-                          })()
+                        })()
                         : 'Выберите точку (Shift+клик)';
                 }
                 document.getElementById('satCard').style.display = 'block';
