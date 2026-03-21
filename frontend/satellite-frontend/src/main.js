@@ -2,7 +2,7 @@ import './style.css';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import * as Cesium from 'cesium';
 import * as satellite from 'satellite.js';
-import { fetchSatellitesData, fetchMeta } from './api.js'; 
+import { fetchSatellitesData, fetchMeta } from './api.js';
 
 // ==========================================
 // 1. ИНИЦИАЛИЗАЦИЯ CESIUM
@@ -16,118 +16,297 @@ const viewer = new Cesium.Viewer('cesiumContainer', {
     navigationHelpButton: false,
     animation: true,
     timeline: true,
-    selectionIndicator: true,
+    selectionIndicator: false, // отключаем — мешает при клике на примитивы
     sceneModePicker: false,
-    shouldAnimate: true // автозапуск времени
+    shouldAnimate: true
 });
 
-// Настройка освещения
+// FPS счётчик для отладки (убери в продакшне)
+// viewer.scene.debugShowFramesPerSecond = true;
+
 viewer.scene.globe.enableLighting = true;
 
-// Глобальные состояния
-let satellitesData = [];
-let activeSatelliteId = null;
+// ==========================================
+// 2. ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+// ==========================================
+let satellitesData = [];       // массив данных со спутниками
+let activeSatelliteId = null;  // id выбранного спутника
+
+// Карта: satId -> { satrec, pointPrimitive, meta }
+const satMap = new Map();
+
+// Кеш для орбит: создаём только при первом клике
+const orbitCache = new Map();
+
+// Ссылки на активные примитивы выбранного спутника
+let activePathEntity = null;
+let activeEllipseEntity = null;
+let activeOrbitPolyline = null;
 let observerEntity = null;
 
-// Инициализируем Web Worker (В Vite он подключается так)
-const passPredictionWorker = new Worker(new URL('./passWorker.js', import.meta.url), { type: 'module' });
+// ==========================================
+// 3. КЛЮЧЕВАЯ ОПТИМИЗАЦИЯ: PointPrimitiveCollection
+// ==========================================
+// Все 100 спутников рисуются за ОДИН draw call вместо 100
+const pointCollection = viewer.scene.primitives.add(
+    new Cesium.PointPrimitiveCollection()
+);
 
 // ==========================================
-// 2. ДВИЖОК ОТРИСОВКИ СПУТНИКОВ (ОПТИМИЗИРОВАННЫЙ)
+// 4. WEB WORKER
 // ==========================================
-function createSatelliteEntity(satData) {
+const passPredictionWorker = new Worker(
+    new URL('./passWorker.js', import.meta.url),
+    { type: 'module' }
+);
+
+// ==========================================
+// 5. СОЗДАНИЕ СПУТНИКА (ОПТИМИЗИРОВАННОЕ)
+// ==========================================
+function createSatelliteEntry(satData) {
     const satrec = satellite.twoline2satrec(satData.tle1, satData.tle2);
 
-    // Предрасчет позиций на 24 часа для высокой производительности (SampledPositionProperty)
+    // Добавляем точку в коллекцию (1 draw call на всю коллекцию).
+    // Позиция обновляется вручную в onTick — не через Property.
+    const pointPrimitive = pointCollection.add({
+        position: new Cesium.Cartesian3(), // заполнится на первом тике
+        pixelSize: 6,
+        color: Cesium.Color.CYAN,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 1,
+        id: `sat-${satData.id}` // для pick по клику
+    });
+
+    satMap.set(satData.id, {
+        satrec,
+        pointPrimitive,
+        meta: satData,
+        show: true
+    });
+}
+
+// ==========================================
+// 5b. SampledPositionProperty — только для АКТИВНОГО спутника
+// ==========================================
+// Создаём SampledPositionProperty с окном ±30 минут от текущего момента.
+// Это нужно для path и ellipse, которым требуется настоящий PositionProperty
+// с поддержкой getValueInReferenceFrame. Строим только для одного спутника.
+function buildSampledPosition(satrec) {
     const positionProperty = new Cesium.SampledPositionProperty();
+    positionProperty.setInterpolationOptions({
+        interpolationDegree: 3,
+        interpolationAlgorithm: Cesium.LagrangePolynomialApproximation
+    });
+
     const startTime = viewer.clock.currentTime;
-
-    // Считаем точки (шаг 1 минута)
-    for (let i = 0; i <= 24 * 60; i += 1) {
-        const time = Cesium.JulianDate.addMinutes(startTime, i, new Cesium.JulianDate());
-        const jsDate = Cesium.JulianDate.toDate(time);
-
+    // Окно: от -5 до +30 минут, шаг 1 минута — итого 36 точек.
+    // Этого достаточно для плавного хвоста и зоны покрытия.
+    for (let i = -5; i <= 30; i += 1) {
+        const julianTime = Cesium.JulianDate.addMinutes(startTime, i, new Cesium.JulianDate());
+        const jsDate = Cesium.JulianDate.toDate(julianTime);
         const posVel = satellite.propagate(satrec, jsDate);
         if (posVel.position) {
             const gmst = satellite.gstime(jsDate);
             const gd = satellite.eciToGeodetic(posVel.position, gmst);
-            const position = Cesium.Cartesian3.fromRadians(gd.longitude, gd.latitude, gd.height * 1000);
-            positionProperty.addSample(time, position);
+            positionProperty.addSample(
+                julianTime,
+                Cesium.Cartesian3.fromRadians(gd.longitude, gd.latitude, gd.height * 1000)
+            );
         }
     }
-
-    // Расчет радиуса зоны радиовидимости (покрытия)
-    const earthRadius = 6371;
-    const maxVisibilityAngle = Math.acos(earthRadius / (earthRadius + (satData.altitude || 500)));
-    const coverageRadius = earthRadius * maxVisibilityAngle * 1000; // в метрах
-
-    const entity = viewer.entities.add({
-        id: `sat-${satData.id}`,
-        name: satData.name,
-        properties: satData,
-        position: positionProperty,
-
-        // Точка спутника
-        point: {
-            pixelSize: 8,
-            color: Cesium.Color.CYAN,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 2,
-        },
-
-        // След (хвост) орбиты за спутником
-        path: {
-            resolution: 1,
-            material: new Cesium.PolylineGlowMaterialProperty({
-                glowPower: 0.1,
-                color: Cesium.Color.YELLOW
-            }),
-            width: 2,
-            leadTime: 0,
-            trailTime: 60 * 45 // Хвост длиной 45 минут
-        },
-
-        // Зона радиовидимости (эллипс на земле)
-        ellipse: {
-            semiMinorAxis: coverageRadius,
-            semiMajorAxis: coverageRadius,
-            material: Cesium.Color.CYAN.withAlpha(0.15),
-            outline: true,
-            outlineColor: Cesium.Color.CYAN.withAlpha(0.4),
-            height: 0,
-            show: false // <--- ДОБАВИТЬ ЭТУ СТРОКУ (Скрываем по умолчанию)
-        }
-    });
-
-    // Полная линия орбиты (изначально скрыта)
-    const orbitLine = viewer.entities.add({
-        id: `orbit-${satData.id}`,
-        polyline: {
-            positions: createFullOrbitPositions(satrec, satData.period || 100),
-            width: 1,
-            material: Cesium.Color.YELLOW.withAlpha(0.4),
-        },
-        show: false
-    });
+    return positionProperty;
 }
 
-function createFullOrbitPositions(satrec, periodMin) {
+// ==========================================
+// 6. ОБНОВЛЕНИЕ ПОЗИЦИЙ ВСЕХ СПУТНИКОВ (onTick)
+// ==========================================
+// Scratch-объекты вне цикла — не создаём мусор для GC
+const scratchTime = new Cesium.JulianDate();
+
+viewer.clock.onTick.addEventListener(function (clock) {
+    const currentTime = clock.currentTime;
+    const jsDate = Cesium.JulianDate.toDate(currentTime);
+
+    for (const [satId, entry] of satMap) {
+        if (!entry.show) continue;
+
+        const posVel = satellite.propagate(entry.satrec, jsDate);
+        if (!posVel.position) continue;
+
+        const gmst = satellite.gstime(jsDate);
+        const gd = satellite.eciToGeodetic(posVel.position, gmst);
+        entry.pointPrimitive.position = Cesium.Cartesian3.fromRadians(
+            gd.longitude,
+            gd.latitude,
+            gd.height * 1000
+        );
+    }
+
+    // Обновление DOM карточки — не чаще 2 раз в секунду
+    updateSatCardCoords(currentTime);
+});
+
+// ==========================================
+// 7. ОБНОВЛЕНИЕ КООРДИНАТ В КАРТОЧКЕ
+// ==========================================
+let lastDomUpdate = 0;
+
+function updateSatCardCoords(currentTime) {
+    const now = performance.now();
+    if (now - lastDomUpdate < 500) return;
+    if (!activeSatelliteId) return;
+    if (document.getElementById('satCard').style.display !== 'block') return;
+
+    const entry = satMap.get(activeSatelliteId);
+    if (!entry) return;
+
+    const pos = entry.pointPrimitive.position;
+    if (!pos || (pos.x === 0 && pos.y === 0 && pos.z === 0)) return;
+
+    const cartographic = Cesium.Cartographic.fromCartesian(pos);
+    const lon = Cesium.Math.toDegrees(cartographic.longitude).toFixed(4);
+    const lat = Cesium.Math.toDegrees(cartographic.latitude).toFixed(4);
+    document.getElementById('satCoords').innerText = `Ш: ${lat}°\nД: ${lon}°`;
+    lastDomUpdate = now;
+}
+
+// ==========================================
+// 8. ОРБИТА (LAZY — только при клике)
+// ==========================================
+function getOrbitPositions(satrec, periodMin) {
     const positions = [];
     const now = new Date();
-    for (let i = 0; i <= periodMin; i += 2) {
+    for (let i = 0; i <= periodMin; i += 3) {
         const time = new Date(now.getTime() + i * 60000);
         const posVel = satellite.propagate(satrec, time);
         if (posVel.position) {
             const gmst = satellite.gstime(time);
             const gd = satellite.eciToGeodetic(posVel.position, gmst);
-            positions.push(Cesium.Cartesian3.fromRadians(gd.longitude, gd.latitude, gd.height * 1000));
+            positions.push(
+                Cesium.Cartesian3.fromRadians(gd.longitude, gd.latitude, gd.height * 1000)
+            );
         }
     }
     return positions;
 }
 
+function showActiveSatelliteDetails(satId) {
+    const entry = satMap.get(satId);
+    if (!entry) return;
+
+    // Строим SampledPositionProperty только для этого спутника.
+    // path и ellipse требуют настоящий PositionProperty (getValueInReferenceFrame).
+    // Строим окно ±5..+30 минут — 36 точек, достаточно для хвоста и зоны покрытия.
+    const sampledPos = buildSampledPosition(entry.satrec);
+
+    // --- Орбита (lazy: создаём один раз, кешируем) ---
+    if (!orbitCache.has(satId)) {
+        const positions = getOrbitPositions(entry.satrec, entry.meta.period || 100);
+        const orbitEntity = viewer.entities.add({
+            id: `orbit-${satId}`,
+            polyline: {
+                positions,
+                width: 1,
+                material: Cesium.Color.YELLOW.withAlpha(0.3),
+            }
+        });
+        orbitCache.set(satId, orbitEntity);
+    }
+    activeOrbitPolyline = orbitCache.get(satId);
+    activeOrbitPolyline.show = true;
+
+    // --- Зона покрытия (только для одного активного спутника) ---
+    if (activeEllipseEntity) {
+        viewer.entities.remove(activeEllipseEntity);
+        activeEllipseEntity = null;
+    }
+
+    const EARTH_RADIUS_KM = 6371;
+
+    // Вычисляем реальный радиус покрытия из текущей позиции спутника.
+    // CallbackProperty позволяет пересчитывать его каждый кадр —
+    // радиус меняется по мере движения (LEO эллиптические орбиты меняют высоту).
+    const ellipsePositionCb = new Cesium.CallbackProperty((time, result) => {
+        const pt = entry.pointPrimitive.position;
+        if (!pt) return undefined;
+        const carto = Cesium.Cartographic.fromCartesian(pt);
+        return Cesium.Cartesian3.fromRadians(
+            carto.longitude, carto.latitude, 0,
+            Cesium.Ellipsoid.WGS84, result
+        );
+    }, false);
+
+    // Радиус зоны покрытия — тоже CallbackProperty.
+    // Реальная высота берётся из текущей позиции pointPrimitive каждый кадр.
+    // Формула: R_earth * arccos(R_earth / (R_earth + h))
+    // Это угол наблюдения с горизонта (elevation = 0°), т.е. максимальная зона видимости.
+    const coverageRadiusCb = new Cesium.CallbackProperty(() => {
+        const pt = entry.pointPrimitive.position;
+        if (!pt) return 1000000; // fallback 1000 км
+
+        const carto = Cesium.Cartographic.fromCartesian(pt);
+        // height в метрах → переводим в км
+        const altKm = carto.height / 1000;
+
+        if (altKm <= 0) return 1000000;
+
+        // Угол между вертикалью наблюдателя и линией к спутнику на горизонте
+        const ratio = EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altKm);
+        // Защита от выхода за пределы arccos
+        const clampedRatio = Math.min(1, Math.max(-1, ratio));
+        const halfAngleRad = Math.acos(clampedRatio);
+
+        // Дуговое расстояние на поверхности Земли в метрах
+        return EARTH_RADIUS_KM * halfAngleRad * 1000;
+    }, false);
+
+    activeEllipseEntity = viewer.entities.add({
+        position: ellipsePositionCb,
+        ellipse: {
+            semiMinorAxis: coverageRadiusCb,
+            semiMajorAxis: coverageRadiusCb,
+            material: Cesium.Color.CYAN.withAlpha(0.12),
+            outline: true,
+            outlineColor: Cesium.Color.CYAN.withAlpha(0.5),
+            outlineWidth: 1,
+            height: 0,
+        }
+    });
+
+    // --- Хвост (path) только для выбранного спутника ---
+    if (activePathEntity) {
+        viewer.entities.remove(activePathEntity);
+        activePathEntity = null;
+    }
+    activePathEntity = viewer.entities.add({
+        position: sampledPos,   // тот же SampledPositionProperty
+        path: {
+            resolution: 60,  // шаг интерполяции в секундах (1 минута)
+            material: new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.7)),
+            width: 2,
+            leadTime: 0,
+            trailTime: 60 * 20  // 20-минутный хвост только у выбранного
+        }
+    });
+}
+
+function hideActiveSatelliteDetails() {
+    if (activeOrbitPolyline) {
+        activeOrbitPolyline.show = false;
+        activeOrbitPolyline = null;
+    }
+    if (activeEllipseEntity) {
+        viewer.entities.remove(activeEllipseEntity);
+        activeEllipseEntity = null;
+    }
+    if (activePathEntity) {
+        viewer.entities.remove(activePathEntity);
+        activePathEntity = null;
+    }
+}
+
 // ==========================================
-// 3. ЗАГРУЗКА ДАННЫХ И ИНИЦИАЛИЗАЦИЯ
+// 9. ЗАГРУЗКА И ИНИЦИАЛИЗАЦИЯ
 // ==========================================
 async function initApp() {
     const loader = document.getElementById('loader');
@@ -135,28 +314,36 @@ async function initApp() {
 
     try {
         loaderText.innerText = "Загрузка TLE данных...";
-        
-        // Загружаем данные параллельно для скорости
+
         const [satellites, metaData] = await Promise.all([
             fetchSatellitesData(),
             fetchMeta()
         ]);
 
         satellitesData = satellites;
-
-        // Заполняем фильтры (select) данными с бэкенда
         populateFilters(metaData);
 
         loaderText.innerText = "Расчет орбит...";
-        // Отрисовываем спутники с небольшой задержкой, чтобы не заблокировать UI
-        setTimeout(() => {
-            satellitesData.forEach(createSatelliteEntity);
-            
-            // Убираем лоадер
-            loader.style.opacity = '0';
-            setTimeout(() => loader.style.display = 'none', 500);
-        }, 100);
 
+        // Рендерим порциями, чтобы не вешать поток
+        const chunkSize = 10;
+        let currentIndex = 0;
+
+        function renderChunk() {
+            const chunk = satellitesData.slice(currentIndex, currentIndex + chunkSize);
+            chunk.forEach(createSatelliteEntry);
+            currentIndex += chunkSize;
+
+            if (currentIndex < satellitesData.length) {
+                loaderText.innerText = `Инициализация: ${currentIndex} / ${satellitesData.length}`;
+                requestAnimationFrame(renderChunk);
+            } else {
+                loader.style.opacity = '0';
+                setTimeout(() => (loader.style.display = 'none'), 500);
+            }
+        }
+
+        requestAnimationFrame(renderChunk);
     } catch (error) {
         loaderText.innerText = "Ошибка загрузки данных!";
         loaderText.style.color = "red";
@@ -164,15 +351,13 @@ async function initApp() {
     }
 }
 
-// Функция для динамического заполнения выпадающих списков
 function populateFilters(meta) {
     const countrySelect = document.getElementById('filterCountry');
     const orbitSelect = document.getElementById('filterOrbit');
-    const purposeSelect = document.getElementById('filterPurpose'); // В бэке это types
+    const purposeSelect = document.getElementById('filterPurpose');
 
     if (!countrySelect || !orbitSelect || !purposeSelect) return;
 
-    // Очищаем и оставляем только "Все"
     countrySelect.innerHTML = '<option value="ALL">Все страны</option>';
     meta.countries.forEach(c => {
         countrySelect.innerHTML += `<option value="${c}">${c}</option>`;
@@ -192,27 +377,29 @@ function populateFilters(meta) {
 initApp();
 
 // ==========================================
-// 4. ФИЛЬТРАЦИЯ
+// 10. ФИЛЬТРАЦИЯ
 // ==========================================
 function applyFilters() {
     const country = document.getElementById('filterCountry').value;
     const orbit = document.getElementById('filterOrbit').value;
     const purpose = document.getElementById('filterPurpose').value;
 
-    satellitesData.forEach(sat => {
-        const entity = viewer.entities.getById(`sat-${sat.id}`);
+    for (const [satId, entry] of satMap) {
+        const sat = entry.meta;
         let show = true;
 
         if (country !== 'ALL' && sat.country !== country) show = false;
         if (orbit !== 'ALL' && sat.orbitType !== orbit) show = false;
         if (purpose !== 'ALL' && sat.purpose !== purpose) show = false;
 
-        if (entity) entity.show = show;
+        entry.show = show;
+        entry.pointPrimitive.show = show;
 
-        if (!show && activeSatelliteId === sat.id) {
+        // Если скрываем активный — закрываем карточку
+        if (!show && activeSatelliteId === satId) {
             closeSatelliteCard();
         }
-    });
+    }
 }
 
 document.getElementById('filterCountry').addEventListener('change', applyFilters);
@@ -220,67 +407,85 @@ document.getElementById('filterOrbit').addEventListener('change', applyFilters);
 document.getElementById('filterPurpose').addEventListener('change', applyFilters);
 
 // ==========================================
-// 5. ВЗАИМОДЕЙСТВИЕ И СОБЫТИЯ UI
+// 11. КЛИК ПО СПУТНИКУ
 // ==========================================
 const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
-// Клик по спутнику
-// Обработка левого клика (выбор спутника)
 handler.setInputAction((movement) => {
+    // Shift + клик — установка наблюдателя (обрабатывается ниже)
+    // Обычный клик — выбор спутника
+
     const pickedObject = viewer.scene.pick(movement.position);
 
-    // Скрываем орбиту и зону покрытия предыдущего выделенного спутника
+    // Скрываем детали предыдущего
     if (activeSatelliteId) {
-        const oldOrbit = viewer.entities.getById(`orbit-${activeSatelliteId}`);
-        if (oldOrbit) oldOrbit.show = false;
-        
-        const oldSat = viewer.entities.getById(`sat-${activeSatelliteId}`);
-        if (oldSat && oldSat.ellipse) oldSat.ellipse.show = false;
+        hideActiveSatelliteDetails();
     }
 
-    // Если кликнули по спутнику
-    if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.id.startsWith('sat-')) {
-        const entity = pickedObject.id;
-        const props = entity.properties.getValue();
-        activeSatelliteId = props.id;
+    // PointPrimitive хранит id в поле .id
+    if (
+        Cesium.defined(pickedObject) &&
+        pickedObject.primitive instanceof Cesium.PointPrimitive &&
+        typeof pickedObject.primitive.id === 'string' &&
+        pickedObject.primitive.id.startsWith('sat-')
+    ) {
+        const satId = parseInt(pickedObject.primitive.id.replace('sat-', ''), 10);
+        const entry = satMap.get(satId);
+        if (!entry) return;
 
-        // Показываем орбиту и зону покрытия (круг) нового спутника
-        const newOrbit = viewer.entities.getById(`orbit-${activeSatelliteId}`);
-        if (newOrbit) newOrbit.show = true;
-        
-        const newSat = viewer.entities.getById(`sat-${activeSatelliteId}`);
-        if (newSat && newSat.ellipse) newSat.ellipse.show = true;
+        activeSatelliteId = satId;
+        const props = entry.meta;
 
-        // Заполняем карточку
-        document.getElementById('satName').innerText = props.name;
-        document.getElementById('satCountry').innerText = props.country;
-        document.getElementById('satOrbitType').innerText = props.orbitType;
-        document.getElementById('satPurpose').innerText = props.purpose;
-        document.getElementById('satAlt').innerText = props.altitude;
-        document.getElementById('satPeriod').innerText = props.period;
+        // Показываем детали нового выбранного
+        showActiveSatelliteDetails(satId);
 
+        // Высота — из реальной текущей позиции через satellite.js (надёжнее поля из API)
+        const nowDate = new Date();
+        const posVelNow = satellite.propagate(entry.satrec, nowDate);
+        let altKmReal = null;
+        if (posVelNow && posVelNow.position) {
+            const gmstNow = satellite.gstime(nowDate);
+            const gdNow = satellite.eciToGeodetic(posVelNow.position, gmstNow);
+            altKmReal = gdNow.height; // уже в км
+        }
+        // Период — из TLE напрямую (строка 2, поле 8: средн. движение об/день → мин)
+        // satrec.no — среднее движение в рад/мин
+        const periodMinReal = entry.satrec.no > 0
+            ? (2 * Math.PI / entry.satrec.no).toFixed(1)
+            : null;
+
+        const altVal = altKmReal !== null
+            ? altKmReal.toFixed(0)
+            : (props.altitude ?? props.alt ?? props.height_km ?? '—');
+        const periodVal = periodMinReal
+            ?? (props.period ?? props.orbital_period ?? props.period_min ?? '—');
+
+        document.getElementById('satName').innerText = props.name || '—';
+        document.getElementById('satCountry').innerText = props.country || '—';
+        document.getElementById('satOrbitType').innerText = props.orbitType || props.orbit || '—';
+        document.getElementById('satPurpose').innerText = props.purpose || props.type || '—';
+        document.getElementById('satAlt').innerText = altVal;
+        document.getElementById('satPeriod').innerText = periodVal;
         document.getElementById('satCard').style.display = 'block';
     } else {
         closeSatelliteCard();
     }
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-// Функция закрытия карточки
+// ==========================================
+// 12. ЗАКРЫТИЕ КАРТОЧКИ
+// ==========================================
 function closeSatelliteCard() {
     document.getElementById('satCard').style.display = 'none';
-    if (activeSatelliteId) {
-        const orbit = viewer.entities.getById(`orbit-${activeSatelliteId}`);
-        if (orbit) orbit.show = false;
-        
-        const sat = viewer.entities.getById(`sat-${activeSatelliteId}`);
-        if (sat && sat.ellipse) sat.ellipse.show = false; // Скрываем круг при закрытии
-        
-        activeSatelliteId = null;
-    }
+    hideActiveSatelliteDetails();
+    activeSatelliteId = null;
 }
+
 document.getElementById('closeCardBtn').addEventListener('click', closeSatelliteCard);
 
-// Переключение 2D/3D
+// ==========================================
+// 13. ПЕРЕКЛЮЧЕНИЕ 2D / 3D
+// ==========================================
 const viewModeBtn = document.getElementById('viewModeBtn');
 viewModeBtn.addEventListener('click', () => {
     if (viewer.scene.mode === Cesium.SceneMode.SCENE3D) {
@@ -292,23 +497,8 @@ viewModeBtn.addEventListener('click', () => {
     }
 });
 
-// Обновление координат в карточке
-viewer.scene.preRender.addEventListener(function () {
-    if (activeSatelliteId && document.getElementById('satCard').style.display === 'block') {
-        const entity = viewer.entities.getById(`sat-${activeSatelliteId}`);
-        const positionCartesian = entity.position.getValue(viewer.clock.currentTime);
-
-        if (positionCartesian) {
-            const cartographic = Cesium.Cartographic.fromCartesian(positionCartesian);
-            const lon = Cesium.Math.toDegrees(cartographic.longitude).toFixed(4);
-            const lat = Cesium.Math.toDegrees(cartographic.latitude).toFixed(4);
-            document.getElementById('satCoords').innerText = `Ш: ${lat}°\nД: ${lon}°`;
-        }
-    }
-});
-
 // ==========================================
-// 6. РАСЧЕТ ПРОЛЕТОВ (WEB WORKER)
+// 14. РАСЧЁТ ПРОЛЁТОВ (SHIFT + КЛИК + WEB WORKER)
 // ==========================================
 handler.setInputAction((movement) => {
     const ray = viewer.camera.getPickRay(movement.position);
@@ -325,14 +515,24 @@ handler.setInputAction((movement) => {
         if (observerEntity) viewer.entities.remove(observerEntity);
         observerEntity = viewer.entities.add({
             position: cartesian,
-            point: { pixelSize: 10, color: Cesium.Color.LIME, outlineColor: Cesium.Color.BLACK, outlineWidth: 2 },
-            label: { text: 'Наблюдатель', font: '14pt sans-serif', verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
+            point: {
+                pixelSize: 10,
+                color: Cesium.Color.LIME,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2
+            },
+            label: {
+                text: 'Наблюдатель',
+                font: '14pt sans-serif',
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -15)
+            }
         });
 
         const passesListDiv = document.getElementById('passesList');
-        passesListDiv.innerHTML = '<p style="color: #63b3ed; text-align:center;">Анализ орбит (Worker)... ⏳</p>';
+        passesListDiv.innerHTML =
+            '<p style="color:#63b3ed;text-align:center;">Анализ орбит (Worker)... ⏳</p>';
 
-        // Отправляем задачу в Web Worker
         passPredictionWorker.postMessage({
             observerCoords: observerLocation,
             satellites: satellitesData,
@@ -341,7 +541,9 @@ handler.setInputAction((movement) => {
     }
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK, Cesium.KeyboardEventModifier.SHIFT);
 
-// Получаем ответ от Web Worker
+// ==========================================
+// 15. ОТВЕТ ОТ WEB WORKER
+// ==========================================
 passPredictionWorker.onmessage = function (e) {
     const passes = e.data;
     const passesListDiv = document.getElementById('passesList');
@@ -352,10 +554,12 @@ passPredictionWorker.onmessage = function (e) {
         return;
     }
 
-    // Выводим Топ-15 ближайших
     passes.slice(0, 15).forEach(pass => {
         const passDate = new Date(pass.time);
-        const timeStr = passDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const timeStr = passDate.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
 
         passesListDiv.innerHTML += `
             <div class="pass-item">
