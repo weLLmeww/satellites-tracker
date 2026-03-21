@@ -1,7 +1,7 @@
 // api.js
 
 // Укажите URL вашего бэкенда (FastAPI по умолчанию работает на 8000 порту)
-const API_BASE_URL = 'https://hak.amnesia.top:8000';
+const API_BASE_URL = 'http://178.236.243.31:8080';
 
 /**
  * 1. Получение списка спутников (GET /satellites)
