@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Мониторинг пролётов спутников | РНИИРС</title>
 </head>
+
 <body>
   <div id="app">
     <!-- Экран загрузки -->
@@ -32,6 +34,9 @@
         <option value="США">США</option>
         <option value="Международный">Международный</option>
       </select>
+
+      <p id="satCounter" style="color:#a0aec0;font-size:12px;margin:5px 0 0 0"></p>
+      <button id="resetFiltersBtn">Сбросить фильтры</button>
 
       <label>Тип орбиты:</label>
       <select id="filterOrbit">
@@ -64,16 +69,19 @@
       <p><b>Период:</b> <span id="satPeriod">—</span> мин</p>
       <div class="divider"></div>
       <p class="live-data"><b>Координаты:</b><br><span id="satCoords">—</span></p>
+      <p><b>След. пролёт:</b><br><span id="satNextPass">—</span></p>
     </div>
 
     <!-- Нижняя панель: Расписание пролетов над точкой -->
     <div id="passesPanel">
       <h3>Ближайшие пролёты над точкой</h3>
       <div id="passesList">
-        <p class="hint-text">Установите точку на карте (Shift + Клик), чтобы рассчитать пролёты всех спутников на 24 часа вперед.</p>
+        <p class="hint-text">Установите точку на карте (Shift + Клик), чтобы рассчитать пролёты всех спутников на 24
+          часа вперед.</p>
       </div>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
+
 </html>
