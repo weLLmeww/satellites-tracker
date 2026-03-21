@@ -1,12 +1,19 @@
-html,
-body,
-#app {
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap');
+
+/* ==========================================
+   RESET & BASE
+   ========================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #app {
   width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
   background-color: #000;
 }
 
@@ -15,225 +22,674 @@ body,
   height: 100%;
 }
 
-/* --- Лоадер --- */
+/* ==========================================
+   ДИЗАЙН-ТОКЕНЫ
+   ========================================== */
+:root {
+  --bg-panel:        rgba(30, 32, 36, 0.96);
+  --bg-panel-hover:  rgba(42, 44, 50, 0.98);
+  --border:          rgba(255, 255, 255, 0.12);
+  --border-active:   rgba(255, 255, 255, 0.35);
+
+  --text-primary:    #f0f0f0;
+  --text-secondary:  rgba(200, 205, 215, 0.7);
+  --text-accent:     #ffffff;
+
+  --accent:          #ffffff;
+  --accent-dim:      rgba(255, 255, 255, 0.1);
+
+  --radius:          10px;
+  --blur:            16px;
+  --shadow:          0 8px 32px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255,255,255,0.04) inset;
+
+  --font-mono:       'Geist Mono', 'Courier New', monospace;
+}
+
+/* ==========================================
+   LOADER
+   ========================================== */
 #loader {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: #0a0f18;
+  inset: 0;
+  background: #000;
   z-index: 9999;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #63b3ed;
-  font-size: 1.2rem;
-  transition: opacity 0.5s;
+  gap: 20px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: opacity 0.6s ease;
 }
 
 .spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid rgba(99, 179, 237, 0.2);
-  border-top-color: #63b3ed;
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #fff;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 20px;
+  animation: spin 0.9s linear infinite;
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
-/* --- Общие стили для панелей --- */
+/* ==========================================
+   ПАНЕЛИ — ОБЩАЯ БАЗА
+   ========================================== */
 #topPanel,
 #filterPanel,
 #satCard,
 #passesPanel {
   position: absolute;
-  background: rgba(15, 25, 45, 0.85);
-  border: 1px solid rgba(100, 150, 255, 0.3);
-  backdrop-filter: blur(8px);
-  color: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  color: var(--text-primary);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   z-index: 1000;
 }
 
-/* --- Верхняя панель (по центру) --- */
+/* ==========================================
+   ВЕРХНЯЯ ПАНЕЛЬ — кнопка 2D/3D (право сверху, над панелью пролётов)
+   ========================================== */
 #topPanel {
-  top: 15px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 10px;
+  top: 16px;
+  right: 16px;
+  left: auto;
+  transform: none;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 5px;
+  align-items: flex-end;
+  gap: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 #viewModeBtn {
-  background: #2a4365;
-  color: white;
-  border: 1px solid #4299e1;
-  padding: 6px 12px;
-  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  font-weight: bold;
-  transition: 0.2s;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
 
 #viewModeBtn:hover {
-  background: #3182ce;
+  color: var(--text-primary);
+  border-color: var(--border-active);
+  background: var(--bg-panel-hover);
 }
 
 .hint {
-  font-size: 12px;
-  color: #a0aec0;
+  display: none; /* убираем подсказку Shift+ЛКМ */
 }
 
-/* --- Панель фильтров (Слева Сверху) --- */
+/* Явно скрыть на случай если hint рендерится отдельным элементом */
+#topPanel .hint,
+#topPanel p.hint,
+.cesium-credit-expand-link {
+  display: none !important;
+}
+
+/* ==========================================
+   ПАНЕЛЬ ФИЛЬТРОВ (лево сверху)
+   ========================================== */
 #filterPanel {
-  top: 15px;
-  left: 15px;
-  padding: 15px;
-  width: 250px;
+  top: 16px;
+  left: 16px;
+  padding: 16px;
+  width: 230px;
 }
 
 #filterPanel h3 {
-  margin: 0 0 15px 0;
-  color: #63b3ed;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-  padding-bottom: 5px;
+  margin: 0 0 14px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
 }
 
 #filterPanel label {
   display: block;
-  font-size: 13px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
   margin-bottom: 5px;
-  color: #e2e8f0;
 }
 
 #filterPanel select {
   width: 100%;
-  margin-bottom: 15px;
-  padding: 6px;
-  background: rgba(0, 0, 0, 0.5);
-  color: white;
-  border: 1px solid #4a5568;
-  border-radius: 4px;
+  margin-bottom: 14px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f0f0f0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,0.5)'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  transition: border-color 0.15s, background 0.15s;
 }
 
-/* --- Панель пролетов (Справа Сверху) --- */
+#filterPanel select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+#filterPanel select option {
+  background: #1e2024;
+  color: #f0f0f0;
+}
+
+#satCounter {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin: 0 0 10px;
+  letter-spacing: 0.02em;
+}
+
+#resetFiltersBtn {
+  width: 100%;
+  padding: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+#resetFiltersBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-active);
+}
+
+/* ==========================================
+   ПАНЕЛЬ ПРОЛЁТОВ (право, ниже кнопки 2D/3D и подсказки)
+   ========================================== */
 #passesPanel {
-  top: 15px;
-  right: 15px;
-  /* Прижали в правый верхний угол */
-  width: 350px;
-  max-height: 300px;
+  top: 76px;
+  right: 16px;
+  width: 300px;
+  max-height: 320px;
   display: flex;
   flex-direction: column;
-  padding: 15px;
+  padding: 16px;
 }
 
 #passesPanel h3 {
-  margin: 0 0 10px 0;
-  font-size: 1rem;
-  color: #feb2b2;
+  margin: 0 0 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  flex-shrink: 0;
 }
 
 #passesList {
   overflow-y: auto;
   flex-grow: 1;
-  font-size: 13px;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Состояние загрузки / пустое */
+#passesList p {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  margin: 8px 0 0;
+  letter-spacing: 0.02em;
 }
 
 .pass-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 2px solid rgba(255, 255, 255, 0.5);
   background: rgba(255, 255, 255, 0.05);
-  padding: 8px;
-  margin-bottom: 5px;
-  border-radius: 4px;
-  border-left: 3px solid #63b3ed;
+  transition: background 0.12s;
+  cursor: default;
+}
+
+.pass-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.pass-item b {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #f0f0f0;
+  display: block;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pass-item div {
+  font-size: 0.75rem;
+  color: rgba(200, 205, 215, 0.75);
+  line-height: 1.6;
 }
 
 .pass-time {
-  color: #fbd38d;
-  font-weight: bold;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .hint-text {
-  color: #a0aec0;
-  font-style: italic;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
 }
 
-/* --- Карточка выбранного спутника (Справа Снизу) --- */
+/* ==========================================
+   КАРТОЧКА СПУТНИКА (право низ)
+   ========================================== */
 #satCard {
-  bottom: 15px;
-  right: 15px;
-  /* Прижали в правый нижний угол */
-  width: 280px;
-  padding: 15px;
+  bottom: 60px; /* чуть выше таймлайна Cesium */
+  right: 16px;
+  width: 260px;
+  padding: 16px;
   display: none;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 15px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-  padding-bottom: 5px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .card-header h3 {
   margin: 0;
-  color: #fbd38d;
-  font-size: 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  max-width: 200px;
+  word-break: break-word;
 }
 
 #closeCardBtn {
   background: none;
   border: none;
-  color: #fc8181;
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 1.2rem;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.15s;
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
+#closeCardBtn:hover {
+  color: var(--text-primary);
+}
+
+/* Строки данных в карточке */
 #satCard p {
-  margin: 8px 0;
-  font-size: 13px;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+#satCard p:last-child {
+  margin-bottom: 0;
 }
 
 #satCard b {
-  color: #a0aec0;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+#satCard span,
+#satCard p > *:last-child {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  text-align: right;
 }
 
 .divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--border);
   margin: 10px 0;
 }
 
-.live-data span {
-  font-family: monospace;
-  font-size: 14px;
-  color: #9ae6b4;
+/* Live-данные (координаты, высота) */
+.live-data p {
+  /* inherit row layout above */
 }
 
-/* Скроллбар */
+.live-data span {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+/* ==========================================
+   CESIUM TOOLBAR (нижний левый блок — часы + кнопки)
+   ========================================== */
+
+/* Враппер часов — не трогаем позицию, Cesium сам управляет */
+
+/* ==========================================
+   CESIUM TIMELINE
+   ========================================== */
+.cesium-viewer-timelineContainer {
+  height: 50px !important;
+  bottom: 0 !important;
+}
+
+.cesium-timeline-main {
+  background: rgba(10, 10, 10, 0.9) !important;
+  border-top: 1px solid rgba(255,255,255,0.08) !important;
+  font-family: 'Geist Mono', monospace !important;
+}
+
+.cesium-timeline-bar {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.cesium-timeline-trackContainer {
+  background: transparent !important;
+}
+
+/* Засечки и подписи времени */
+.cesium-timeline-ruler {
+  background: transparent !important;
+}
+
+.cesium-timeline-ticLabel {
+  font-family: 'Geist Mono', monospace !important;
+  font-size: 10px !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  letter-spacing: 0.03em !important;
+}
+
+/* Ползунок текущего времени */
+.cesium-timeline-needle {
+  background: rgba(255, 255, 255, 0.9) !important;
+  width: 1px !important;
+}
+
+/* Подсветка выбранного диапазона */
+.cesium-timeline-highlight {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ==========================================
+   CESIUM ANIMATION WIDGET — не трогаем, оставляем дефолт
+   ========================================== */
+
+/* Активный элемент в списке пролётов */
+.pass-item--active {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Текст скорости внутри виджета */
+.cesium-animation-speedIndicator {
+  font-family: 'Geist Mono', monospace !important;
+  fill: rgba(255,255,255,0.5) !important;
+  font-size: 9px !important;
+}
+
+/* ==========================================
+   CESIUM ION CREDIT (логотип снизу)
+   ========================================== */
+.cesium-credit-logoContainer,
+.cesium-credit-textContainer {
+  filter: grayscale(1) brightness(0.5) !important;
+  opacity: 0.4 !important;
+  transform: scale(0.85) !important;
+  transform-origin: bottom left !important;
+}
+
+.cesium-credit-textContainer a,
+.cesium-credit-textContainer {
+  font-family: 'Geist', sans-serif !important;
+  font-size: 10px !important;
+  color: rgba(255,255,255,0.3) !important;
+}
+
+/* ==========================================
+   CESIUM TOOLBAR BUTTONS (fullscreen и др.)
+   ========================================== */
+.cesium-viewer-toolbar {
+  top: auto !important;
+  bottom: 55px !important;
+  right: 10px !important;
+}
+
+.cesium-button {
+  background: rgba(10,10,10,0.8) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  color: rgba(255,255,255,0.5) !important;
+  font-family: 'Geist', sans-serif !important;
+  border-radius: 5px !important;
+}
+
+.cesium-button:hover {
+  background: rgba(30,30,30,0.95) !important;
+  border-color: rgba(255,255,255,0.2) !important;
+  color: rgba(255,255,255,0.9) !important;
+}
+
+/* ==========================================
+   ПАНЕЛЬ СРАВНЕНИЯ ГРУППИРОВОК
+   ========================================== */
+.compare-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 14px 0;
+}
+
+#comparePanel h3 {
+  margin: 0 0 14px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+#comparePanel label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+
+#comparePanel select {
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f0f0f0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+#comparePanel select option {
+  background: #1e2024;
+  color: #f0f0f0;
+}
+
+#compareBtn, #compareResetBtn {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 12px;
+}
+
+#compareBtn {
+  background: rgba(255,255,255,0.1);
+  color: #f0f0f0;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+#compareBtn:hover {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.4);
+}
+
+#compareResetBtn {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+#compareResetBtn:hover {
+  color: #f0f0f0;
+  border-color: var(--border-active);
+}
+
+.compare-stat {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: #f0f0f0;
+}
+
+.compare-stat:last-child {
+  border-bottom: none;
+}
+
+.compare-stat b {
+  font-weight: 600;
+}
+
+.compare-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.compare-orbits {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  padding-left: 14px;
+  letter-spacing: 0.02em;
+}
+
+/* ==========================================
+   ЛЕГЕНДА ЗОН В КАРТОЧКЕ
+   ========================================== */
+.zone-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.zone-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.zone-legend-line {
+  width: 18px;
+  height: 2px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+/* ==========================================
+   СКРОЛЛБАР
+   ========================================== */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 3px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4a5568;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }

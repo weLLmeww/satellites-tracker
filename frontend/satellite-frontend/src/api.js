@@ -10,7 +10,7 @@ const API_BASE_URL = 'https://hak.amnesia.top:8000';
  */
 export async function fetchSatellitesData() {
     try {
-        const response = await fetch(`${API_BASE_URL}/satellites?limit=1000&offset=0`);
+        const response = await fetch(`${API_BASE_URL}/satellites?limit=200&offset=0`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const json = await response.json();
