@@ -220,19 +220,55 @@ function showActiveSatelliteDetails(satId) {
         viewer.entities.remove(activeEllipseEntity);
         activeEllipseEntity = null;
     }
-    const earthRadius = 6371;
-    const alt = entry.meta.altitude || 500;
-    const maxAngle = Math.acos(earthRadius / (earthRadius + alt));
-    const coverageRadius = earthRadius * maxAngle * 1000;
+
+    const EARTH_RADIUS_KM = 6371;
+
+    // Вычисляем реальный радиус покрытия из текущей позиции спутника.
+    // CallbackProperty позволяет пересчитывать его каждый кадр —
+    // радиус меняется по мере движения (LEO эллиптические орбиты меняют высоту).
+    const ellipsePositionCb = new Cesium.CallbackProperty((time, result) => {
+        const pt = entry.pointPrimitive.position;
+        if (!pt) return undefined;
+        const carto = Cesium.Cartographic.fromCartesian(pt);
+        return Cesium.Cartesian3.fromRadians(
+            carto.longitude, carto.latitude, 0,
+            Cesium.Ellipsoid.WGS84, result
+        );
+    }, false);
+
+    // Радиус зоны покрытия — тоже CallbackProperty.
+    // Реальная высота берётся из текущей позиции pointPrimitive каждый кадр.
+    // Формула: R_earth * arccos(R_earth / (R_earth + h))
+    // Это угол наблюдения с горизонта (elevation = 0°), т.е. максимальная зона видимости.
+    const coverageRadiusCb = new Cesium.CallbackProperty(() => {
+        const pt = entry.pointPrimitive.position;
+        if (!pt) return 1000000; // fallback 1000 км
+
+        const carto = Cesium.Cartographic.fromCartesian(pt);
+        // height в метрах → переводим в км
+        const altKm = carto.height / 1000;
+
+        if (altKm <= 0) return 1000000;
+
+        // Угол между вертикалью наблюдателя и линией к спутнику на горизонте
+        const ratio = EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altKm);
+        // Защита от выхода за пределы arccos
+        const clampedRatio = Math.min(1, Math.max(-1, ratio));
+        const halfAngleRad = Math.acos(clampedRatio);
+
+        // Дуговое расстояние на поверхности Земли в метрах
+        return EARTH_RADIUS_KM * halfAngleRad * 1000;
+    }, false);
 
     activeEllipseEntity = viewer.entities.add({
-        position: sampledPos,   // SampledPositionProperty — всё работает
+        position: ellipsePositionCb,
         ellipse: {
-            semiMinorAxis: coverageRadius,
-            semiMajorAxis: coverageRadius,
-            material: Cesium.Color.CYAN.withAlpha(0.15),
+            semiMinorAxis: coverageRadiusCb,
+            semiMajorAxis: coverageRadiusCb,
+            material: Cesium.Color.CYAN.withAlpha(0.12),
             outline: true,
-            outlineColor: Cesium.Color.CYAN.withAlpha(0.4),
+            outlineColor: Cesium.Color.CYAN.withAlpha(0.5),
+            outlineWidth: 1,
             height: 0,
         }
     });
@@ -403,13 +439,33 @@ handler.setInputAction((movement) => {
         // Показываем детали нового выбранного
         showActiveSatelliteDetails(satId);
 
-        // Заполняем карточку
-        document.getElementById('satName').innerText = props.name;
-        document.getElementById('satCountry').innerText = props.country;
-        document.getElementById('satOrbitType').innerText = props.orbitType;
-        document.getElementById('satPurpose').innerText = props.purpose;
-        document.getElementById('satAlt').innerText = props.altitude;
-        document.getElementById('satPeriod').innerText = props.period;
+        // Высота — из реальной текущей позиции через satellite.js (надёжнее поля из API)
+        const nowDate = new Date();
+        const posVelNow = satellite.propagate(entry.satrec, nowDate);
+        let altKmReal = null;
+        if (posVelNow && posVelNow.position) {
+            const gmstNow = satellite.gstime(nowDate);
+            const gdNow = satellite.eciToGeodetic(posVelNow.position, gmstNow);
+            altKmReal = gdNow.height; // уже в км
+        }
+        // Период — из TLE напрямую (строка 2, поле 8: средн. движение об/день → мин)
+        // satrec.no — среднее движение в рад/мин
+        const periodMinReal = entry.satrec.no > 0
+            ? (2 * Math.PI / entry.satrec.no).toFixed(1)
+            : null;
+
+        const altVal = altKmReal !== null
+            ? altKmReal.toFixed(0)
+            : (props.altitude ?? props.alt ?? props.height_km ?? '—');
+        const periodVal = periodMinReal
+            ?? (props.period ?? props.orbital_period ?? props.period_min ?? '—');
+
+        document.getElementById('satName').innerText = props.name || '—';
+        document.getElementById('satCountry').innerText = props.country || '—';
+        document.getElementById('satOrbitType').innerText = props.orbitType || props.orbit || '—';
+        document.getElementById('satPurpose').innerText = props.purpose || props.type || '—';
+        document.getElementById('satAlt').innerText = altVal;
+        document.getElementById('satPeriod').innerText = periodVal;
         document.getElementById('satCard').style.display = 'block';
     } else {
         closeSatelliteCard();
