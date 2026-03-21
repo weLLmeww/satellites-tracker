@@ -71,7 +71,7 @@ function createSatelliteEntry(satData) {
     const pointPrimitive = pointCollection.add({
         position: new Cesium.Cartesian3(), // заполнится на первом тике
         pixelSize: 6,
-        color: Cesium.Color.CYAN,
+        color: Cesium.Color.PLUM,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1,
         id: `sat-${satData.id}` // для pick по клику
