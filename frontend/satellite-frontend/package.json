@@ -13,6 +13,7 @@
     "vite-plugin-cesium": "^1.2.23"
   },
   "dependencies": {
-    "cesium": "^1.139.1"
+    "cesium": "^1.139.1",
+    "satellite.js": "^6.0.2"
   }
 }

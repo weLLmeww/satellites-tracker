@@ -1,22 +1,79 @@
 <!DOCTYPE html>
 <html lang="ru">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Satellite Tracker</title>
+  <title>Мониторинг пролётов спутников | РНИИРС</title>
 </head>
-
 <body>
   <div id="app">
+    <!-- Экран загрузки -->
+    <div id="loader">
+      <div class="spinner"></div>
+      <p id="loaderText">Подключение к серверу орбитальных данных...</p>
+    </div>
+
+    <!-- 3D Глобус -->
     <div id="cesiumContainer"></div>
+
+    <!-- Верхняя панель -->
+    <div id="topPanel">
+      <button id="viewModeBtn">Переключить в 2D</button>
+      <div class="hint">ℹ️ Shift + ЛКМ по карте — установить точку наблюдателя</div>
+    </div>
+
+    <!-- Левая панель: Фильтры -->
+    <div id="filterPanel">
+      <h3>Фильтры группировок</h3>
+      <label>Страна/Оператор:</label>
+      <select id="filterCountry">
+        <option value="ALL">Все</option>
+        <option value="Россия">Россия</option>
+        <option value="США">США</option>
+        <option value="Международный">Международный</option>
+      </select>
+
+      <label>Тип орбиты:</label>
+      <select id="filterOrbit">
+        <option value="ALL">Все</option>
+        <option value="LEO">Низкая (LEO)</option>
+        <option value="MEO">Средняя (MEO)</option>
+        <option value="GEO">Геостационарная (GEO)</option>
+      </select>
+
+      <label>Назначение:</label>
+      <select id="filterPurpose">
+        <option value="ALL">Все</option>
+        <option value="Навигация">Навигация</option>
+        <option value="Связь">Связь</option>
+        <option value="Наука">Наука</option>
+        <option value="Метеорология">Метеорология</option>
+      </select>
+    </div>
+
+    <!-- Правая панель: Карточка выбранного спутника -->
     <div id="satCard">
-      <h3 id="satName">Название</h3>
-      <p>Высота: <span id="satAlt">0</span> км</p>
-      <p>Координаты: <span id="satCoords">0, 0</span></p>
+      <div class="card-header">
+        <h3 id="satName">Название</h3>
+        <button id="closeCardBtn">✖</button>
+      </div>
+      <p><b>Страна:</b> <span id="satCountry">—</span></p>
+      <p><b>Орбита:</b> <span id="satOrbitType">—</span></p>
+      <p><b>Назначение:</b> <span id="satPurpose">—</span></p>
+      <p><b>Высота:</b> <span id="satAlt">—</span> км</p>
+      <p><b>Период:</b> <span id="satPeriod">—</span> мин</p>
+      <div class="divider"></div>
+      <p class="live-data"><b>Координаты:</b><br><span id="satCoords">—</span></p>
+    </div>
+
+    <!-- Нижняя панель: Расписание пролетов над точкой -->
+    <div id="passesPanel">
+      <h3>Ближайшие пролёты над точкой</h3>
+      <div id="passesList">
+        <p class="hint-text">Установите точку на карте (Shift + Клик), чтобы рассчитать пролёты всех спутников на 24 часа вперед.</p>
+      </div>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
-
 </html>
