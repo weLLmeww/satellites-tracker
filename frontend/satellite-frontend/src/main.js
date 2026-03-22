@@ -126,11 +126,7 @@ function createSatelliteEntry(satData) {
     const pointPrimitive = pointCollection.add({
         position: new Cesium.Cartesian3(),
         pixelSize: 6,
-<<<<<<< HEAD
-        color: Cesium.Color.PLUM,
-=======
         color: getOrbitColor(satData.orbitType),
->>>>>>> 4c01debf69c13c2fe09a39889c768d99e7c08a1c
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 1,
         id: `sat-${satData.id}`
