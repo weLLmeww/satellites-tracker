@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Мониторинг пролётов спутников | РНИИРС</title>
+
+  <!-- Основные стили приложения -->
+  <link rel="stylesheet" href="/src/ui/styles/style.css" />
+  <!-- Мобильная адаптация -->
+  <link rel="stylesheet" href="/src/ui/mobile/styles/mobile.css" />
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- ── Экран загрузки ── -->
+    <div id="loader">
+      <div class="spinner"></div>
+      <p id="loaderText">Подключение к серверу орбитальных данных...</p>
+    </div>
+
+    <!-- ── 3D Глобус ── -->
+    <div id="cesiumContainer"></div>
+
+    <!-- ── Десктоп: верхняя панель ── -->
+    <div id="topPanel">
+      <button id="viewModeBtn">Переключить в 2D</button>
+      <div class="hint">ℹ️ Shift + ЛКМ по карте — установить точку наблюдателя</div>
+    </div>
+
+    <!-- ── Десктоп: фильтры ── -->
+    <div id="filterPanel">
+      <h3>Фильтры группировок</h3>
+      <label>Страна/Оператор:</label>
+      <select id="filterCountry">
+        <option value="ALL">Все страны</option>
+      </select>
+      <label>Тип орбиты:</label>
+      <select id="filterOrbit">
+        <option value="ALL">Все орбиты</option>
+      </select>
+      <label>Назначение:</label>
+      <select id="filterPurpose">
+        <option value="ALL">Все назначения</option>
+      </select>
+      <p id="satCounter"></p>
+      <button id="resetFiltersBtn">Сбросить фильтры</button>
+    </div>
+
+    <!-- ── Десктоп: карточка спутника ── -->
+    <div id="satCard">
+      <div class="card-header">
+        <h3 id="satName">Название</h3>
+        <button id="closeCardBtn">✖</button>
+      </div>
+      <p><b>Страна:</b> <span id="satCountry">—</span></p>
+      <p><b>Орбита:</b> <span id="satOrbitType">—</span></p>
+      <p><b>Назначение:</b> <span id="satPurpose">—</span></p>
+      <p><b>Высота:</b> <span id="satAlt">—</span> км</p>
+      <p><b>Период:</b> <span id="satPeriod">—</span> мин</p>
+      <div class="divider"></div>
+      <p class="live-data"><b>Координаты:</b><br><span id="satCoords">—</span></p>
+      <p><b>След. пролёт:</b><br><span id="satNextPass">—</span></p>
+    </div>
+
+    <!-- ── Десктоп: панель пролётов ── -->
+    <div id="passesPanel">
+      <h3>Ближайшие пролёты над точкой</h3>
+      <div id="passesList">
+        <p class="hint-text">
+          Установите точку на карте (Shift + Клик), чтобы рассчитать пролёты всех спутников на 24 часа вперед.
+        </p>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         МОБИЛЬНЫЙ UI
+    ═══════════════════════════════════════ -->
+
+    <!-- Кнопка установки наблюдателя -->
+    <button id="observerBtn" title="Установить точку наблюдателя">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+        stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+        <path d="M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+      </svg>
+    </button>
+
+    <!-- Оверлей -->
+    <div id="sheetOverlay"></div>
+
+    <!-- ── Bottom Sheet: Фильтры ── -->
+    <div id="sheetFilters" class="bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span>Фильтры</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button id="view3dBtn">2D / 3D</button>
+          <button class="sheet-close" data-sheet="sheetFilters">✕</button>
+        </div>
+      </div>
+      <div class="sheet-body">
+        <label>Страна/Оператор</label>
+        <select id="filterCountryM">
+          <option value="ALL">Все страны</option>
+        </select>
+        <label>Тип орбиты</label>
+        <select id="filterOrbitM">
+          <option value="ALL">Все орбиты</option>
+        </select>
+        <label>Назначение</label>
+        <select id="filterPurposeM">
+          <option value="ALL">Все назначения</option>
+        </select>
+        <!-- satCounter скрыт, используется satCounterM -->
+        <p id="satCounterM"
+          style="color:rgba(200,205,215,0.6);font-size:0.75rem;margin:14px 0 10px;letter-spacing:0.03em;"></p>
+        <button id="resetFiltersBtnM">Сбросить фильтры</button>
+      </div>
+    </div>
+
+    <!-- ── Bottom Sheet: Пролёты ── -->
+    <div id="sheetPasses" class="bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span>Пролёты над точкой</span>
+        <button class="sheet-close" data-sheet="sheetPasses">✕</button>
+      </div>
+      <div class="sheet-body" id="passesListM">
+        <p style="color:rgba(200,205,215,0.5);font-size:0.78rem;">
+          Нажмите 📍 и удерживайте палец на карте, чтобы установить точку наблюдателя и рассчитать пролёты на 24 часа
+          вперёд.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Bottom Sheet: Карточка спутника ── -->
+    <div id="sheetSatCard" class="bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span id="sheetSatName">Спутник</span>
+        <button class="sheet-close" data-sheet="sheetSatCard">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p><b>Страна</b><span id="sheetSatCountry">—</span></p>
+        <p><b>Орбита</b><span id="sheetSatOrbitType">—</span></p>
+        <p><b>Назначение</b><span id="sheetSatPurpose">—</span></p>
+        <p><b>Высота</b><span><span id="sheetSatAlt">—</span> км</span></p>
+        <p><b>Период</b><span><span id="sheetSatPeriod">—</span> мин</span></p>
+        <div class="divider"></div>
+        <p><b>Координаты</b><span id="sheetSatCoords">—</span></p>
+        <p><b>След. пролёт</b><span id="sheetSatNextPass">—</span></p>
+      </div>
+    </div>
+
+    <!-- ── Bottom Sheet: Сравнение ── -->
+    <div id="sheetCompare" class="bottom-sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <span>Сравнение группировок</span>
+        <button class="sheet-close" data-sheet="sheetCompare">✕</button>
+      </div>
+      <div class="sheet-body" id="compareSheetBody">
+        <label>Группировка А</label>
+        <select id="compareAM">
+          <option value="">— выберите —</option>
+        </select>
+        <label>Группировка Б</label>
+        <select id="compareBM">
+          <option value="">— выберите —</option>
+        </select>
+        <button id="compareBtnM">Сравнить</button>
+        <button id="compareResetBtnM" style="display:none">Сбросить</button>
+        <div id="compareStatsM"></div>
+      </div>
+    </div>
+
+    <!-- ── Нижняя навигация ── -->
+    <nav id="mobileNav">
+      <button class="nav-btn" id="navFilters" data-sheet="sheetFilters">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <line x1="4" y1="6" x2="20" y2="6" />
+          <line x1="8" y1="12" x2="16" y2="12" />
+          <line x1="10" y1="18" x2="14" y2="18" />
+        </svg>
+        <span class="nav-label">Фильтры</span>
+      </button>
+      <button class="nav-btn" id="navPasses" data-sheet="sheetPasses">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+          <path d="M2 17l10 5 10-5" />
+          <path d="M2 12l10 5 10-5" />
+        </svg>
+        <span class="nav-label">Пролёты</span>
+      </button>
+      <button class="nav-btn" id="navSatCard" data-sheet="sheetSatCard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M20.7 7.3a10 10 0 1 1-17.4 9.4" />
+          <path d="M3.3 7.3a10 10 0 0 1 4-4" />
+        </svg>
+        <span class="nav-label">Спутник</span>
+      </button>
+      <button class="nav-btn" id="navCompare" data-sheet="sheetCompare">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <rect x="2" y="3" width="9" height="18" rx="2" />
+          <rect x="13" y="3" width="9" height="18" rx="2" />
+        </svg>
+        <span class="nav-label">Сравнение</span>
+      </button>
+    </nav>
+
+    <!-- Тост -->
+    <div id="toast"></div>
+
+  </div>
+
+  <!-- Мобильный UI (composition root) -->
+  <script type="module" src="/src/ui/mobile/mobile.js"></script>
+  <!-- Основная логика приложения -->
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
