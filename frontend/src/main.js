@@ -2,7 +2,7 @@ import './ui/styles/style.css';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import * as Cesium from 'cesium';
 import * as satellite from 'satellite.js';
-import { fetchSatellitesData, fetchMeta } from './controllers/api.js';
+import { fetchSatellitesData, fetchMeta } from './services/api.js';
 
 // ==========================================
 // 1. ИНИЦИАЛИЗАЦИЯ CESIUM
